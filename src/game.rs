@@ -1,7 +1,7 @@
-use std::thread::current;
-
 use PitKind::*;
 use Player::*;
+
+use crate::engine::negamax;
 #[derive(Debug, Clone)]
 pub struct KalahaState {
     pub to_play: Player,
@@ -24,6 +24,14 @@ impl KalahaState {
             game_state: GameState::Playing,
             last_moves: Vec::new(),
             switched_turn: true,
+        }
+    }
+    pub fn play_moves(&mut self, moves: Vec<usize>) {
+        if moves.len() == 0 {
+            self.snatch_seeds();
+        }
+        for mov in moves {
+            self.play_move(mov);
         }
     }
     pub fn play_move(&mut self, pit_index: usize) {
@@ -49,11 +57,11 @@ impl KalahaState {
         for mov in valid_moves {
             let mut new_kalaha_state = self.clone();
             new_kalaha_state.play_move(mov);
-            if !self.switched_turn {
-                sequence_results
-                    .append(&mut new_kalaha_state.clone().generate_move_sequence_results());
+            if !new_kalaha_state.switched_turn {
+                sequence_results.append(&mut new_kalaha_state.generate_move_sequence_results());
+            } else {
+                sequence_results.push(new_kalaha_state);
             }
-            sequence_results.push(new_kalaha_state);
         }
         sequence_results
     }
@@ -115,6 +123,7 @@ impl KalahaState {
             std::cmp::Ordering::Equal => GameState::GameOver(None),
             std::cmp::Ordering::Less => GameState::GameOver(Some(Batal)),
         };
+        self.last_moves = Vec::new();
         self.game_state = new_game_state;
     }
     pub fn evaluate(&self) -> i32 {
@@ -127,7 +136,7 @@ impl KalahaState {
                 * match winner {
                     None => 0,
                     Some(Almuta) => i32::MAX,
-                    Some(Batal) => i32::MIN,
+                    Some(Batal) => -i32::MAX,
                 };
         }
         let current_player_points = self.board[self.player_stash(self.to_play)].value;
@@ -137,6 +146,27 @@ impl KalahaState {
     }
     pub fn game_is_over(&self) -> bool {
         self.game_state != GameState::Playing
+    }
+    pub fn ai_vs_ai(depth: u8) {
+        let mut game = Self::new_game();
+        loop {
+            if game.game_is_over() {
+                println!("{:?}", game.game_state);
+                return;
+            }
+            let (eval, moves) = negamax(&game, &mut -i32::MAX, &mut i32::MAX, depth);
+            if let Some(moves) = moves {
+                println!("{}", &game);
+                println!("{:?}", &moves);
+                game.play_moves(moves);
+                println!("eval is now {}", eval);
+            } else {
+                game.snatch_seeds();
+                let winner = game.game_state;
+                println!("{:?}", winner);
+                return;
+            }
+        }
     }
 }
 pub fn new_board() -> [Pit; 14] {
