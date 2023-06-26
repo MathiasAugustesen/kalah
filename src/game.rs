@@ -1,3 +1,5 @@
+use std::{io::Read, ops::IndexMut};
+
 use PitKind::*;
 use Player::*;
 
@@ -70,16 +72,27 @@ impl KalahaState {
         let selected_pit = &mut self.board[pit_index];
         let mut seeds_to_distribute = std::mem::take(&mut selected_pit.value);
         let mut deposit_pit_index = pit_index;
+
         while seeds_to_distribute > 0 {
             deposit_pit_index = (deposit_pit_index + 1) % 14;
             let deposit_pit = &mut self.board[deposit_pit_index];
-            if match self.to_play {
+            let seed_can_be_deposited_legally = match self.to_play {
                 Almuta => deposit_pit.kind != BatalStash,
                 Batal => deposit_pit.kind != AlmutaStash,
-            } {
+            };
+
+            if seed_can_be_deposited_legally {
                 deposit_pit.add_seed(&mut seeds_to_distribute);
             }
         }
+        let final_deposit_pit = self.board[deposit_pit_index];
+        if seeds_to_distribute == 0
+            && final_deposit_pit.value == 1
+            && final_deposit_pit.is_player_pit(self.to_play)
+        {
+            self.steal_opposing_seeds(deposit_pit_index);
+        }
+
         match self.board[deposit_pit_index].kind {
             AlmutaStash | BatalStash => true,
             _ => false,
@@ -101,6 +114,11 @@ impl KalahaState {
         self.board[player_stash_index].value += snatched_seeds;
 
         self.resolve_game();
+    }
+    fn steal_opposing_seeds(&mut self, pit_index: usize) {
+        let opposing_pit_index = 12 - pit_index;
+        let stolen_seeds = std::mem::take(&mut self.board[opposing_pit_index].value);
+        self.board[self.player_stash(self.to_play)].value += stolen_seeds;
     }
     fn player_pits_slice(&self, player: Player) -> std::ops::Range<usize> {
         match player {
@@ -168,6 +186,50 @@ impl KalahaState {
             }
         }
     }
+    pub fn player_vs_ai(depth: u8, player: Player) {
+        let mut game = Self::new_game();
+        while !game.game_is_over() {
+            while game.to_play == player {
+                let valid_moves = game.valid_moves();
+                let player_move = Self::get_player_move(&valid_moves);
+                game.play_move(player_move);
+                println!("Current board position: \n{}", &game);
+            }
+            let (eval, moves) = negamax(&game, &mut -i32::MAX, &mut -(-i32::MAX), depth);
+            if let Some(moves) = moves {
+                println!("The AI has chosen to play the moves {:?}", &moves);
+                game.play_moves(moves);
+                println!("eval is now {}", eval);
+            } else {
+                game.snatch_seeds();
+                let winner = game.game_state;
+                println!("{:?}", winner);
+                return;
+            }
+            println!("Current board position: \n{}", &game);
+        }
+    }
+    fn get_player_move(valid_moves: &[usize]) -> usize {
+        loop {
+            let mut input_string = String::new();
+            std::io::stdin()
+                .read_line(&mut input_string)
+                .expect("Failed to read line");
+
+            let input: usize = match input_string.trim().parse() {
+                Ok(num) => num,
+                Err(_) => {
+                    eprintln!("Input was not a valid usize");
+                    continue;
+                }
+            };
+            if valid_moves.contains(&input) {
+                return input;
+            } else {
+                continue;
+            }
+        }
+    }
 }
 pub fn new_board() -> [Pit; 14] {
     [
@@ -219,6 +281,12 @@ impl Pit {
     pub fn add_seed(&mut self, seeds_to_distribute: &mut i32) {
         self.value += 1;
         *seeds_to_distribute -= 1;
+    }
+    fn is_player_pit(&self, player: Player) -> bool {
+        match player {
+            Almuta => self.kind == AlmutaPit,
+            Batal => self.kind == BatalPit,
+        }
     }
 }
 impl std::fmt::Display for Pit {

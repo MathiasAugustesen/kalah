@@ -10,12 +10,13 @@ pub fn negamax(
     }
     let mut best_eval = -i32::MAX;
     let mut best_moves = None;
-    let generated_sequences = &kalaha_state.generate_move_sequence_results();
+    let mut generated_sequences = kalaha_state.generate_move_sequence_results();
+    generated_sequences.sort_by(|a, b| b.last_moves.len().cmp(&a.last_moves.len()));
     for game in generated_sequences {
-        let (eval, _) = negamax(game, &mut -*beta, &mut -*alpha, depth - 1);
-        let eval = -eval;
-        let mut temp_eval = eval;
-        *alpha = *alpha.max(&mut temp_eval);
+        let (eval, _) = negamax(&game, &mut -*beta, &mut -*alpha, depth - 1);
+        let mut eval = -eval;
+        *alpha = *alpha.max(&mut eval);
+
         if eval >= best_eval {
             best_eval = eval;
             best_moves = Some(game.last_moves.clone());
