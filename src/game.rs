@@ -3,7 +3,7 @@ use std::{io::Read, ops::IndexMut};
 use PitKind::*;
 use Player::*;
 
-use crate::engine::negamax;
+use crate::engine::{negamax, negamax_search};
 #[derive(Debug, Clone)]
 pub struct KalahaState {
     pub to_play: Player,
@@ -98,7 +98,7 @@ impl KalahaState {
             _ => false,
         }
     }
-    fn valid_moves(&self) -> Vec<usize> {
+    pub fn valid_moves(&self) -> Vec<usize> {
         let slice = self.player_pits_slice(self.to_play);
         slice
             .into_iter()
@@ -172,7 +172,7 @@ impl KalahaState {
                 println!("{:?}", game.game_state);
                 return;
             }
-            let (eval, moves) = negamax(&game, &mut -i32::MAX, &mut i32::MAX, depth);
+            let (moves, eval) = negamax_search(&game, depth);
             if let Some(moves) = moves {
                 println!("{}", &game);
                 println!("{:?}", &moves);
@@ -195,7 +195,7 @@ impl KalahaState {
                 game.play_move(player_move);
                 println!("Current board position: \n{}", &game);
             }
-            let (eval, moves) = negamax(&game, &mut -i32::MAX, &mut -(-i32::MAX), depth);
+            let (moves, eval) = negamax_search(&game, depth);
             if let Some(moves) = moves {
                 println!("The AI has chosen to play the moves {:?}", &moves);
                 game.play_moves(moves);
