@@ -1,36 +1,28 @@
 use crate::game::KalahaState;
-pub fn negamax(kalaha_state: &KalahaState, alpha: i32, beta: i32, depth: u8) -> i32 {
+pub fn negamax(
+    kalaha_state: &KalahaState,
+    depth: u8,
+    alpha: i32,
+    beta: i32,
+) -> (i32, Option<Vec<usize>>) {
     if depth == 0 || kalaha_state.game_is_over() {
-        return kalaha_state.evaluate();
+        return (kalaha_state.evaluate(), None);
     }
     let mut best_eval = -i32::MAX;
+    let mut best_moves = None;
     let mut generated_sequences = kalaha_state.generate_move_sequence_results();
-    generated_sequences.sort_by(|a, b| b.last_moves.len().cmp(&a.last_moves.len()));
+    generated_sequences.sort_by(|a, b| a.last_moves.len().cmp(&b.last_moves.len()));
     for game in generated_sequences {
-        let eval = -negamax(&game, beta, alpha, depth - 1);
+        let (eval, _) = negamax(&game, depth - 1, -beta, -alpha);
+        let eval = -eval;
         let alpha = alpha.max(eval);
-
-        if eval >= best_eval {
-            best_eval = eval;
-        }
         if alpha >= beta {
             break;
         }
-    }
-    best_eval
-}
-pub fn negamax_search(kalaha_state: &KalahaState, depth: u8) -> (Option<Vec<usize>>, i32) {
-    let mut best_move = None;
-    let mut best_eval = -i32::MAX;
-    let mut alpha = -i32::MAX;
-    let beta = i32::MAX;
-    for game in &kalaha_state.generate_move_sequence_results() {
-        let eval = -negamax(game, -beta, -alpha, depth - 1);
         if eval >= best_eval {
             best_eval = eval;
-            best_move = Some(game.last_moves.clone());
+            best_moves = Some(game.last_moves);
         }
-        alpha = alpha.max(eval);
     }
-    (best_move, best_eval)
+    (best_eval, best_moves)
 }

@@ -1,9 +1,7 @@
-use std::{io::Read, ops::IndexMut};
-
 use PitKind::*;
 use Player::*;
 
-use crate::engine::{negamax, negamax_search};
+use crate::engine::negamax;
 #[derive(Debug, Clone)]
 pub struct KalahaState {
     pub to_play: Player,
@@ -11,6 +9,7 @@ pub struct KalahaState {
     pub game_state: GameState,
     pub last_moves: Vec<usize>,
     pub switched_turn: bool,
+    pub turns_played: u8,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameState {
@@ -26,10 +25,11 @@ impl KalahaState {
             game_state: GameState::Playing,
             last_moves: Vec::new(),
             switched_turn: true,
+            turns_played: 0,
         }
     }
     pub fn play_moves(&mut self, moves: Vec<usize>) {
-        if moves.len() == 0 {
+        if moves.is_empty() {
             self.snatch_seeds();
         }
         for mov in moves {
@@ -46,11 +46,18 @@ impl KalahaState {
         if !same_player_to_play {
             self.to_play = self.to_play.opposite();
             self.switched_turn = true;
+            self.turns_played += 1;
+            if self.end_by_majority_seeds() {
+                self.resolve_game()
+            }
         }
+    }
+    fn end_by_majority_seeds(&self) -> bool {
+        self.stash_seeds(Almuta) > 36 || self.stash_seeds(Batal) > 36
     }
     pub fn generate_move_sequence_results(&self) -> Vec<KalahaState> {
         let valid_moves = self.valid_moves();
-        if valid_moves.len() == 0 {
+        if valid_moves.is_empty() {
             let mut game_end = self.clone();
             game_end.snatch_seeds();
             return vec![game_end];
@@ -107,18 +114,19 @@ impl KalahaState {
     }
     fn snatch_seeds(&mut self) {
         let slice = self.player_pits_slice(self.to_play.opposite());
-        let player_stash_index = self.player_stash(self.to_play);
         let target_pits = &self.board[slice];
-
         let snatched_seeds: i32 = target_pits.iter().map(|x| x.value).sum();
-        self.board[player_stash_index].value += snatched_seeds;
+
+        let player_stash = self.stash_seeds_mut(self.to_play);
+
+        *player_stash += snatched_seeds;
 
         self.resolve_game();
     }
     fn steal_opposing_seeds(&mut self, pit_index: usize) {
         let opposing_pit_index = 12 - pit_index;
         let stolen_seeds = std::mem::take(&mut self.board[opposing_pit_index].value);
-        self.board[self.player_stash(self.to_play)].value += stolen_seeds;
+        *self.stash_seeds_mut(self.to_play) += stolen_seeds;
     }
     fn player_pits_slice(&self, player: Player) -> std::ops::Range<usize> {
         match player {
@@ -126,41 +134,45 @@ impl KalahaState {
             Batal => 7..13,
         }
     }
-    fn player_stash(&self, player: Player) -> usize {
+    fn stash_index(&self, player: Player) -> usize {
         match player {
             Almuta => 6,
             Batal => 13,
         }
     }
+    fn stash_seeds(&self, player: Player) -> i32 {
+        let index = self.stash_index(player);
+        self.board[index].value
+    }
+    fn stash_seeds_mut(&mut self, player: Player) -> &mut i32 {
+        let index = self.stash_index(player);
+        &mut self.board[index].value
+    }
     fn resolve_game(&mut self) {
-        let new_game_state = match self.board[self.player_stash(Almuta)]
-            .value
-            .cmp(&self.board[self.player_stash(Batal)].value)
+        let new_game_state = match self
+            .stash_seeds(self.to_play)
+            .cmp(&self.stash_seeds(self.to_play.opposite()))
         {
             std::cmp::Ordering::Greater => GameState::GameOver(Some(Almuta)),
             std::cmp::Ordering::Equal => GameState::GameOver(None),
             std::cmp::Ordering::Less => GameState::GameOver(Some(Batal)),
         };
-        self.last_moves = Vec::new();
         self.game_state = new_game_state;
     }
     pub fn evaluate(&self) -> i32 {
-        if self.game_state != GameState::Playing {
-            let winner = match self.game_state {
-                GameState::Playing => unreachable!(),
-                GameState::GameOver(winner) => winner,
-            };
-            return self.to_play.relative_factor()
-                * match winner {
-                    None => 0,
-                    Some(Almuta) => i32::MAX,
-                    Some(Batal) => -i32::MAX,
-                };
-        }
-        let current_player_points = self.board[self.player_stash(self.to_play)].value;
-        let opposing_player_points = self.board[self.player_stash(self.to_play.opposite())].value;
-
-        current_player_points - opposing_player_points
+        let absolute_evaluation = match self.game_state {
+            GameState::Playing => {
+                let almuta_points = self.stash_seeds(Almuta);
+                let batal_points = self.stash_seeds(Batal);
+                almuta_points - batal_points
+            }
+            GameState::GameOver(winner) => match winner {
+                None => 0,
+                Some(Almuta) => i32::MAX - self.turns_played as i32,
+                Some(Batal) => -i32::MAX + self.turns_played as i32,
+            },
+        };
+        absolute_evaluation * self.to_play.relative_factor()
     }
     pub fn game_is_over(&self) -> bool {
         self.game_state != GameState::Playing
@@ -172,7 +184,7 @@ impl KalahaState {
                 println!("{:?}", game.game_state);
                 return;
             }
-            let (moves, eval) = negamax_search(&game, depth);
+            let (eval, moves) = negamax(&game, depth, -i32::MAX, i32::MAX);
             if let Some(moves) = moves {
                 println!("{}", &game);
                 println!("{:?}", &moves);
@@ -191,11 +203,17 @@ impl KalahaState {
         while !game.game_is_over() {
             while game.to_play == player {
                 let valid_moves = game.valid_moves();
+                if valid_moves.is_empty() {
+                    game.snatch_seeds();
+                    let winner = game.game_state;
+                    println!("{:?}", winner);
+                    return;
+                }
                 let player_move = Self::get_player_move(&valid_moves);
                 game.play_move(player_move);
                 println!("Current board position: \n{}", &game);
             }
-            let (moves, eval) = negamax_search(&game, depth);
+            let (eval, moves) = negamax(&game, depth, -i32::MAX, i32::MAX);
             if let Some(moves) = moves {
                 println!("The AI has chosen to play the moves {:?}", &moves);
                 game.play_moves(moves);
@@ -256,12 +274,12 @@ impl std::fmt::Display for KalahaState {
         let batal_pits = &self.board[7..13];
         let batal_stash = self.board[13];
         for pit in batal_pits.iter().rev() {
-            write!(f, "{} ", pit)?
+            write!(f, " {:<3}", pit.value)?
         }
         writeln!(f)?;
-        writeln!(f, "{}                 {} ", batal_stash, almuta_stash)?;
+        writeln!(f, "{}                 {}", batal_stash, almuta_stash)?;
         for pit in almuta_pits.iter() {
-            write!(f, "{} ", pit)?
+            write!(f, " {:<3}", pit.value)?
         }
         Ok(())
     }
